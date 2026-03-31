@@ -1,0 +1,5 @@
+id,source,customer,date,agent,service_product,program,incident_id,activity,notes
+1,email,Acme Corp,3/1/2026,alice,Data Analytics,Managed Insights,,Dashboard usage,"Hi, thanks for attending the call. I tested the solution, it provide great insights but data refresh is too slow and feels clunky."
+2,ticket,Globex,3/2/2026,bob,Data Integration,Integration Care,INC1234,Data Pipeline,Fantastic support; everything works smoothly and the connectors are rock-solid.
+3,call,Initech,3/3/2026,charlie,Data Analytics,Managed Insights,,Proof of Value,Love the dashboards  but errors pop up when filtering huge datasets.
+4,escalation,Initech,3/10/2026,jose,Data Integration,Platform Services,,Data Pipeline,I want to thank all for attending the call and helping addressing the problem. However I am icluding here Manuel to express my disatissfaction with the team not solving this quickly and include the A team.

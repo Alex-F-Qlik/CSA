@@ -1,0 +1,25 @@
+source_weights:
+  email: 1.0
+  ticket: 1.25
+  call: 1.1
+  meeting: 1.05
+  qbr: 1.5
+  survey: 0.9
+  escalation: 1.75
+severity_weights:
+  very_positive: 2.0
+  positive: 1.0
+  neutral: 0.5
+  negative: 1.0
+  very_negative: 1.75
+sentiment_score_map:
+  VERY_POSITIVE: 2
+  POSITIVE: 1
+  NEUTRAL: 0
+  NEGATIVE: -1
+  VERY_NEGATIVE: -2
+aggregated_sentiment_thresholds:
+  very_positive: 1.5
+  positive: 0.5
+  neutral: -0.5
+  negative: -1.5

@@ -1,0 +1,9 @@
+id,signal_id,signal,weight,signal_score,signal_sentiment,aggregated_score,aggregated_sentiment
+1,cc1fae071b7d,data refresh is too slow and feels clunky,1.0,-1.75,very_negative,2.25,very_positive
+1,55c5c064df8b,for attending the call,1.0,2.0,very_positive,2.25,very_positive
+1,c31230e46860,i tested the solution it provide great insights,1.0,2.0,very_positive,2.25,very_positive
+2,cf4f5ad7225d,fantastic support e t ng works smoothly and the connectors are rock-solid,1.25,2.5,very_positive,2.5,very_positive
+3,4ad1df34ae1d,errors pop up when filtering huge datasets,1.1,-1.9250000000000003,very_negative,0.2749999999999999,neutral
+3,da39040a0b74,love the dashboards,1.1,2.2,very_positive,0.2749999999999999,neutral
+4,8dcbc8bb84c8,i am icluding here manuel to express my disatissfaction with the team not solving t s quickly and include the a team,1.75,-3.0625,very_negative,0.4375,neutral
+4,c235da0e7e89,i want to thank all for attending the call and helping addressing the problem,1.75,3.5,very_positive,0.4375,neutral
