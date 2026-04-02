@@ -271,7 +271,7 @@ def process_batch(
     config = {}
     for key, path in config_paths.items():
         config[key] = load_yaml(path)
-    data = pd.read_csv(source_path, parse_dates=["date"], dtype=str)
+    data = pd.read_csv(source_path, parse_dates=["date"], dtype=str, encoding="utf-8", encoding_errors="replace")
     validate_schema(data)
     nlp_model = build_spacy_model() if nlp_model is _SENTINEL else nlp_model
     sentiment_model = build_sentiment_pipeline() if sentiment_model is _SENTINEL else sentiment_model
