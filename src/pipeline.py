@@ -68,7 +68,88 @@ _GREETING_ONLY_TERMS = {
     "your",
     "support",
     "appreciate",
+    "always",
+    "as",
+    "quick",
+    "fix",
+    "hopefully",
 }
+# Matches social/courtesy phrases in original text (before fluff removal).
+# Used to catch closings like "Thanks for your support" and vague fillers like "Hopefully a quick fix"
+# that lose their greeting word after fluff cleaning and would otherwise slip through.
+_SOCIAL_PATTERNS = re.compile(
+    r"^\s*(?:"
+    r"thanks?\s+for\b"
+    r"|thank\s+you\s+for\b"
+    r"|hopefully\b"
+    r"|(?:just\s+a?\s*)?heads?\s*up\b"
+    r"|appreciate\s+(?:your|the)\b"
+    r"|looking\s+forward\b"
+    r")",
+    re.IGNORECASE,
+)
+_MIN_SIGNAL_TOKENS = 3
+# Detects technical log/error content that carries no sentiment value:
+# error log fields, ODBC/SQL Server tags, SQL return codes, line/column references.
+_TECHNICAL_LOG_PATTERNS = re.compile(
+    r"(?:retcode\s*:|sqlstate\s*:|nativeerror\s*:|"
+    r"\[microsoft\]|\[odbc|\[sql\s+server\]|"
+    r"\bsql_error\b|\bsql_success\b|"
+    r"line\s*:\s*-?\d+\s+column\s*:\s*-?\d+|"
+    r"\bcannot\s+insert\b)",          # SQL error message bodies
+    re.IGNORECASE,
+)
+# Strips leading/trailing numbered list markers: "3. Signal text" → "Signal text",
+# "Signal text 3" → "Signal text"
+_LIST_MARKER = re.compile(r"(?:^\s*\d+[\.\)]\s*|\s+\d+\s*$)")
+# Sentences matching these patterns are pure background narrative — timeline facts,
+# reproduction steps, or test descriptions — that carry no customer judgment.
+# The whitelist approach (requiring impact phrases) was too narrow and silently
+# dropped everyday feedback like "too slow", "failing", "Fantastic support".
+# A blacklist is safer: filter only what we can positively identify as noise.
+_BACKGROUND_PATTERNS = re.compile(
+    r"(?:"
+    r"\bwe\s+(?:also\s+)?tested\b"
+    r"|\bwe\s+were\s+able\s+to\s+reproduce\b"
+    r"|\bit\s+was\s+only\s+through\b"
+    r"|\bthis\s+is\s+how\b"
+    r"|\bwere\s+subsequently\b"
+    r"|\bwere\s+(?:added|changed|loaded|released|updated|modified)\s+(?:to|during|in|on)\b"
+    r")",
+    re.IGNORECASE,
+)
+# Stopwords excluded from Jaccard similarity during deduplication.
+_DEDUP_STOPWORDS = {
+    "the", "a", "an", "in", "on", "at", "to", "for", "of", "and", "or",
+    "is", "was", "were", "be", "been", "are", "it", "its", "this", "that",
+    "these", "those", "with", "by", "from", "as", "into", "through", "not",
+    "we", "our", "they", "their", "has", "have", "had", "also", "only",
+    "even", "but", "which", "who", "what", "how", "all", "due",
+}
+
+
+def _deduplicate_signals(texts: List[str]) -> List[str]:
+    """Remove near-duplicate signals using Jaccard similarity on meaningful words.
+
+    Two signals are considered duplicates when they share more than 60 % of
+    their non-stopword vocabulary.  The first-encountered signal is kept so
+    that the numbered-list items (which appear earlier) take precedence over
+    the prose restatements that follow.
+    """
+    def meaningful(text: str) -> set:
+        return {w for w in text.lower().split() if w not in _DEDUP_STOPWORDS and len(w) > 2}
+
+    kept: List[str] = []
+    for text in texts:
+        words = meaningful(text)
+        duplicate = any(
+            len(words & meaningful(k)) / len(words | meaningful(k)) >= 0.6
+            for k in kept
+            if words and meaningful(k)
+        )
+        if not duplicate:
+            kept.append(text)
+    return kept
 
 
 def load_yaml(path: Path) -> dict:
@@ -102,7 +183,9 @@ def clean_text(text: str, fluff_terms: Iterable[str]) -> str:
         return ""
     normalized = text.lower()
     for term in fluff_terms:
-        normalized = normalized.replace(term, " ")
+        # Use word boundaries to avoid corrupting words that contain fluff terms
+        # e.g. "hi" must not remove "hi" from "this" → "t s"
+        normalized = re.sub(r"\b" + re.escape(term) + r"\b", " ", normalized)
     normalized = re.sub(r"[^\w\s-]", " ", normalized)
     normalized = re.sub(r"\s+", " ", normalized).strip()
     return normalized
@@ -127,6 +210,10 @@ def chunk_notes(text: str, nlp_model) -> List[str]:
 
 
 def _is_greeting_chunk(text: str, fluff_terms: Iterable[str]) -> bool:
+    # Check original text first — social patterns like "Thanks for your support"
+    # lose their greeting word after fluff cleaning, so we must catch them here.
+    if _SOCIAL_PATTERNS.match(text.strip()):
+        return True
     cleaned = clean_text(text, fluff_terms)
     if not cleaned:
         return True
@@ -147,8 +234,15 @@ def _filter_signal_candidates(chunks: Iterable[str], fluff_terms: Iterable[str])
     for chunk in chunks:
         if _is_greeting_chunk(chunk, fluff_terms):
             continue
+        if _TECHNICAL_LOG_PATTERNS.search(chunk):
+            continue
+        if _BACKGROUND_PATTERNS.search(chunk):
+            continue
         cleaned = clean_text(chunk, fluff_terms)
         if not cleaned:
+            continue
+        cleaned = _LIST_MARKER.sub(" ", cleaned).strip()
+        if len(cleaned.split()) < _MIN_SIGNAL_TOKENS:
             continue
         filtered.append(cleaned)
     return filtered
@@ -159,7 +253,8 @@ def prepare_signal_texts(text: str, nlp_model, fluff_terms: Iterable[str]) -> Li
     if not candidates:
         cleaned_full = clean_text(text, fluff_terms)
         return extract_signals_from_text(cleaned_full, nlp_model)
-    return _filter_signal_candidates(candidates, fluff_terms)
+    filtered = _filter_signal_candidates(candidates, fluff_terms)
+    return _deduplicate_signals(filtered)
 
 
 
@@ -278,7 +373,13 @@ def process_batch(
     records = []
     for _, row in data.iterrows():
         signals = process_interaction(row, config.get("fluff"), nlp_model, sentiment_model, config.get("weights", {}))
-        aggregated_score = sum(signal.signal_score for signal in signals)
+        weights_cfg = config.get("weights", {})
+        bias = weights_cfg.get("negativity_bias", 1.0)
+        max_signals = weights_cfg.get("max_signals_per_interaction", len(signals))
+        # Keep the most extreme signals (by absolute score) up to the configured cap
+        scored = sorted(signals, key=lambda s: abs(s.signal_score), reverse=True)[:max_signals]
+        biased = [s.signal_score * bias if s.signal_score < 0 else s.signal_score for s in scored]
+        aggregated_score = sum(biased) / len(biased) if biased else 0.0
         aggregated_sentiment = aggregate_sentiment(aggregated_score, config.get("weights", {}).get("aggregated_sentiment_thresholds", {}))
         for signal in signals:
             records.append(

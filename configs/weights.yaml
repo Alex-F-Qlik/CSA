@@ -7,19 +7,25 @@ source_weights:
   survey: 0.9
   escalation: 1.75
 severity_weights:
-  very_positive: 2.0
+  very_positive: 1.5
   positive: 1.0
   neutral: 0.5
-  negative: 1.0
-  very_negative: 1.75
+  negative: 1.5
+  very_negative: 2.25
+negativity_bias: 1.5
+max_signals_per_interaction: 7
 sentiment_score_map:
   VERY_POSITIVE: 2
   POSITIVE: 1
   NEUTRAL: 0
   NEGATIVE: -1
   VERY_NEGATIVE: -2
+# Thresholds calibrated for mean-based aggregated_score (not sum).
+# Reference score ranges per signal:
+#   ticket very_positive: +3.75  |  ticket very_negative (w/ bias): -8.44
+#   escalation very_positive: +5.25  |  escalation very_negative (w/ bias): -11.81
 aggregated_sentiment_thresholds:
-  very_positive: 1.5
-  positive: 0.5
-  neutral: -0.5
-  negative: -1.5
+  very_positive: 3.0
+  positive: 0.8
+  neutral: -1.5
+  negative: -4.0

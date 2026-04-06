@@ -4,3 +4,118 @@ id,source,customer,date,agent,service_product,program,incident_id,activity,notes
 3,call,Initech,3/3/2026,charlie,Data Analytics,Managed Insights,,Proof of Value,Love the dashboards  but errors pop up when filtering huge datasets.
 4,escalation,Initech,3/10/2026,jose,Data Integration,Platform Services,,Data Pipeline,I want to thank all for attending the call and helping addressing the problem. However I am icluding here Manuel to express my disatissfaction with the team not solving this quickly and include the A team.
 5,ticket,KKH,4/1/2026,Alex,Data Analytics,Platform Services,IN-0000056,Reload task failing in PRD,"Hi Team, just a heads up — we noticed some tasks are failing on the PROD server due to XYZ server being unavailable. We've already flagged it with the infrastructure team and it looks like they are on top of it. Hopefully a quick fix! Thanks for your support as always."
+6,ticket,P66,4/1/2026,Alex,Data Integration,Platform Services,55,Change in the schema,"Hi team,
+
+ 
+
+with the release of Bitmarck 21c on March 21, 2026 new columns were added to 18 tables - initially -  as NULLABLE. These were subsequently changed to NOT NULL (presumably immediately after the columns were loaded during the release). These changes were not detected by Qlik and were not passed on to the target system. As a result, the new columns were created in the DWH as NULLABLE.
+
+ 
+
+It was only through last Sunday’s reload (March 29, 2026) that Qlik correctly recreated the table structures. Subsequent processes in the DWH detected the structural differences and aborted. This is how this behavior was first noticed.
+
+ 
+
+Qlik’s failure to make the structural adjustments to NOT NULL leads to the following problems:
+
+ 
+
+1. Table structures are not passed on correctly
+
+2. Aborted processes in the DWH due to structural differences
+
+3. Additional manual effort in the DWH to correct the table structures
+
+4. Without a reload, we would not have noticed the error at all!
+
+ 
+
+We were able to reproduce the observed behavior on our test system.
+
+ 
+
+We also tested the other way around – changing NOT NULL to NULL. This scenario is even worse as the replication process keeps running but in the end it results in a database error ‘cannot insert NULL’ on the target, which is written to the exception table (as was the case for the UPDATEs for missing rows).
+
+ 
+
+
+
+ 
+
+Logged error:
+
+ 
+
+RetCode: SQL_ERROR
+
+SqlState: 23000
+
+NativeError: 515
+
+Message:
+
+[Microsoft][ODBC Driver 18 for SQL Server][SQL Server]
+
+Cannot insert the value NULL into column 'TestColumn', table 'CDC_LIVE_E.KKH_DATA_01.TestTable2';
+
+column does not allow nulls. INSERT fails. Line: 1 Column: -1
+
+ 
+
+From our perspective, this behavior should not occur, and we therefore request that a ticket be opened with technical support."
+7,ticket,P66,3/30/2026,Iuri,Data Integration,Platform Services,247006,Configuring Database,"CAUTION: This email originated from outside of the organization. Do not click links or open attachments unless you recognize the sender and know the content is safe.
+
+
+ 
+
+ 
+
+From: IT Customer Support Services <phillips66@service-now.com>
+Sent: Monday, March 30, 2026 3:23 PM
+To: Taylor, Bill K <Bill.Taylor@p66.com>; Saganti, Pavankumar (Accenture) <Pavankumar.Saganti@contractor.p66.com>; Khalilulla, Ibrahim (Accenture) <Ibrahim.Khalilulla@contractor.p66.com>; Tonial, Fernando (Qlik Consultants) <Fernando.Tonial@contractor.p66.com>; Dias, Duglas (Qlik Consultants) <Duglas.Dias@contractor.p66.com>; Junior, Silvan (Qlik Consultants) <Silvan.Junior@contractor.p66.com>; Monteiro, Iuri (Qlik Consultants) <Iuri.Monteiro@contractor.p66.com>; BN, CHANDANKUMAR (Qlik Consultants) <CHANDANKUMAR.BN@contractor.p66.com>; Sunki, Abishek (Qlik Consultants) <Abishek.Sunki@contractor.p66.com>; P, Tamilarasu (Qlik Consultants) <Tamilarasu.P@contractor.p66.com>; Chauhan, Gaurav (Qlik Consultants) <Gaurav.Chauhan@contractor.p66.com>; Villarreal, Pedro B <Pedro.B.Villarreal@p66.com>; Varadharajan, Priyanka (Qlik Consultants) <Priyanka.Varadharajan@contractor.p66.com>; Maruboina, Premchand (Qlik Consultants) <Premchand.Maruboina@contractor.p66.com>; Dara, Rambabu (Accenture) <Rambabu.Dara@contractor.p66.com>; Wankhade, Shubham (Accenture) <Shubham.Wankhade@contractor.p66.com>; Shrivastava, Gouri (Qlik Consultants) <Gouri.Shrivastava@contractor.p66.com>; Vangala, Pradeep R (Bluo Software LLC) <Pradeep.R.Vangala@contractor.p66.com>; Vaddimukala, Balaji (Accenture) <Balaji.Vaddimukala@contractor.p66.com>; Salas, Juan (Qlik Consultants) <Juan.Salas@contractor.p66.com>; Shingate, Swapnil (Qlik Consultants) <Swapnil.Shingate@contractor.p66.com>; P, Praveen (Qlik Consultants) <Praveen.P@contractor.p66.com>; Tippani, Srinivas (Accenture) <Srinivas.Tippani@contractor.p66.com>; Girkala, Vinay (Qlik Consultants) <Vinay.Girkala@contractor.p66.com>
+Subject: TASK6806299 has been assigned to SD_QLIKATT_REPLICATE_SUPPORT
+
+ 
+
+Service Catalog - Action Required
+
+From ServiceNow, IT Service Catalog
+
+
+
+This task has been assigned to your group:
+
+Task Number:
+
+TASK6806299
+
+Assignment Group:
+
+SD_QLIKATT_REPLICATE_SUPPORT
+
+Requested For:
+
+Namit Jain (jainn)
+
+Task Name:
+
+Data Engineering - Qlik PS
+
+Task Description:
+
+Data Engineering or Replication issues related requests
+Replicate in ANLC ADH schema. Note: We already have an attunity id on this database that i requested long time back and alreay has access to the schma.
+
+Groups
+Group_approver
+group_members
+user
+Click here to see the detailed request
+
+Assign this Task to Me by Email
+
+Contact:
+If you have any questions about this specific request, please contact the requestor: Namit Jain (jainn).
+If you have any questions regarding this process or notification, please contact the IT ServiceDesk.
+
+Please do not reply to this notice, the mailbox is not attended."
