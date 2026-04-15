@@ -88,7 +88,7 @@ _SOCIAL_PATTERNS = re.compile(
     r")",
     re.IGNORECASE,
 )
-_MIN_SIGNAL_TOKENS = 3
+_MIN_SIGNAL_TOKENS = 5
 # Detects technical log/error content that carries no sentiment value:
 # error log fields, ODBC/SQL Server tags, SQL return codes, line/column references.
 _TECHNICAL_LOG_PATTERNS = re.compile(
@@ -115,9 +115,59 @@ _BACKGROUND_PATTERNS = re.compile(
     r"|\bthis\s+is\s+how\b"
     r"|\bwere\s+subsequently\b"
     r"|\bwere\s+(?:added|changed|loaded|released|updated|modified)\s+(?:to|during|in|on)\b"
+    # Layer 3: boilerplate fragments that survive line-level pre-processing
+    r"|\bif\s+you\s+have\s+any\s+questions\s+(?:about|regarding)\b"
+    r"|\bplease\s+contact\s+the\b"
+    r"|\bcontact\s+the\s+(?:it\s+)?servicedesk\b"
+    r"|\bthis\s+(?:email|message|notice)\s+(?:is|was)\s+sent\b"
     r")",
     re.IGNORECASE,
 )
+# ── Layer 1: pre-processing patterns (applied line-by-line before chunking) ──────
+# Email thread header lines: "From:", "To:", "Sent:", "Subject:", "CC:", "Date:"
+_EMAIL_HEADER_LINE = re.compile(
+    r"^\s*(?:from|to|cc|bcc|sent|subject|date)\s*:",
+    re.IGNORECASE,
+)
+# Distribution list lines: ≥2 occurrences of known role/org keywords means the line
+# is a name-role-email dump with no sentiment value.
+_DIST_LIST_MARKERS = re.compile(
+    r"\b(?:contractor|consultant|accenture|bluo\s+software|qlik\s+consultant)\b",
+    re.IGNORECASE,
+)
+# ServiceNow / ITSM ticketing system template lines and email security boilerplate.
+_BOILERPLATE_LINE = re.compile(
+    r"(?:task\s+number|assignment\s+group|task\s+name\b|task\s+description|"
+    r"requested\s+for|click\s+here\s+to|assign\s+this\s+task|action\s+required\s+from|"
+    r"service\s+catalog|this\s+task\s+has\s+been\s+assigned|"
+    r"caution.*email.*outside|do\s+not\s+click\s+links|"
+    r"please\s+do\s+not\s+reply|mailbox\s+is\s+not\s+attended|"
+    r"group_approver|group_members|"
+    # ServiceNow task body lines: alphanumeric task ID followed by a system queue name
+    r"task\d+\s+\w+_\w+|"
+    # Internal system queue/group names (underscore-delimited identifiers)
+    r"\bsd_\w+|\bsrq_\w+|\binc_\w+)",
+    re.IGNORECASE,
+)
+# Sentences matching these patterns are informational/request statements with no
+# customer sentiment. They are kept as signals (they document context) but their
+# score is forced to neutral (0) rather than run through the sentiment model.
+_NEUTRAL_INTENT_PATTERNS = re.compile(
+    r"(?:"
+    r"^\s*note\s*[:—\-]?\s*we\b"      # "Note: we already have..."
+    r"|^\s*note\s*[:—\-]\s*"           # "Note: ..." (generic)
+    r"|\bwe\s+(?:are\s+)?requesting\b"
+    r"|\bwe\s+(?:would\s+like\s+to\s+)?request\b"
+    r"|\bplease\s+(?:open|create|raise|submit)\s+a\s+ticket\b"
+    r"|\bwe\s+therefore\s+request\b"
+    r"|\bcan\s+(?:you|someone)\s+please\b"
+    r"|\bkindly\s+(?:assist|help|provide|check)\b"
+    r")",
+    re.IGNORECASE,
+)
+# ── Layer 2: PII masking ─────────────────────────────────────────────────────────
+_EMAIL_ADDRESS_PATTERN = re.compile(r"\b[\w.+-]+@[\w.-]+\.\w+\b")
+
 # Stopwords excluded from Jaccard similarity during deduplication.
 _DEDUP_STOPWORDS = {
     "the", "a", "an", "in", "on", "at", "to", "for", "of", "and", "or",
@@ -126,6 +176,43 @@ _DEDUP_STOPWORDS = {
     "we", "our", "they", "their", "has", "have", "had", "also", "only",
     "even", "but", "which", "who", "what", "how", "all", "due",
 }
+
+
+def _preprocess_notes(text: str) -> str:
+    """Layer 1 — strip non-signal blocks before the text reaches spaCy.
+
+    Operates line-by-line so that distribution list dumps, email thread headers,
+    and ITSM boilerplate are removed wholesale rather than leaking into chunks.
+    """
+    kept = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            kept.append("")
+            continue
+        if _EMAIL_HEADER_LINE.match(stripped):
+            continue
+        if _BOILERPLATE_LINE.search(stripped):
+            continue
+        if len(_DIST_LIST_MARKERS.findall(stripped)) >= 2:
+            continue
+        kept.append(line)
+    return "\n".join(kept)
+
+
+def _mask_pii(text: str, nlp_model) -> str:
+    """Layer 2 — replace PII with placeholder tokens before signal text is stored.
+
+    - Email addresses → [EMAIL]  (regex, fast)
+    - Person names    → [PERSON] (spaCy NER, right-to-left to preserve offsets)
+    """
+    text = _EMAIL_ADDRESS_PATTERN.sub("[EMAIL]", text)
+    if nlp_model is not None:
+        doc = nlp_model(text)
+        for ent in sorted(doc.ents, key=lambda e: e.start_char, reverse=True):
+            if ent.label_ == "PERSON":
+                text = text[: ent.start_char] + "[PERSON]" + text[ent.end_char :]
+    return text
 
 
 def _deduplicate_signals(texts: List[str]) -> List[str]:
@@ -229,8 +316,11 @@ def _is_greeting_chunk(text: str, fluff_terms: Iterable[str]) -> bool:
     return False
 
 
-def _filter_signal_candidates(chunks: Iterable[str], fluff_terms: Iterable[str]) -> List[str]:
-    filtered: List[str] = []
+def _filter_signal_candidates(
+    chunks: Iterable[str], fluff_terms: Iterable[str]
+) -> List[tuple]:
+    """Return list of (cleaned_text, force_neutral: bool) tuples."""
+    filtered: List[tuple] = []
     for chunk in chunks:
         if _is_greeting_chunk(chunk, fluff_terms):
             continue
@@ -238,23 +328,32 @@ def _filter_signal_candidates(chunks: Iterable[str], fluff_terms: Iterable[str])
             continue
         if _BACKGROUND_PATTERNS.search(chunk):
             continue
+        force_neutral = bool(_NEUTRAL_INTENT_PATTERNS.search(chunk))
         cleaned = clean_text(chunk, fluff_terms)
         if not cleaned:
             continue
         cleaned = _LIST_MARKER.sub(" ", cleaned).strip()
         if len(cleaned.split()) < _MIN_SIGNAL_TOKENS:
             continue
-        filtered.append(cleaned)
+        filtered.append((cleaned, force_neutral))
     return filtered
 
 
-def prepare_signal_texts(text: str, nlp_model, fluff_terms: Iterable[str]) -> List[str]:
+def prepare_signal_texts(
+    text: str, nlp_model, fluff_terms: Iterable[str]
+) -> List[tuple]:
+    """Return list of (signal_text, force_neutral: bool) tuples."""
+    text = _preprocess_notes(text)        # Layer 1: strip headers / boilerplate / dist-lists
+    text = _mask_pii(text, nlp_model)    # Layer 2: [EMAIL] / [PERSON] substitution
     candidates = chunk_notes(text, nlp_model)
     if not candidates:
         cleaned_full = clean_text(text, fluff_terms)
-        return extract_signals_from_text(cleaned_full, nlp_model)
+        return [(s, False) for s in extract_signals_from_text(cleaned_full, nlp_model)]
     filtered = _filter_signal_candidates(candidates, fluff_terms)
-    return _deduplicate_signals(filtered)
+    deduped_texts = _deduplicate_signals([t for t, _ in filtered])
+    # Re-attach force_neutral flags after deduplication
+    neutral_map = {t: n for t, n in filtered}
+    return [(t, neutral_map.get(t, False)) for t in deduped_texts]
 
 
 
@@ -324,12 +423,16 @@ def process_interaction(
         "VERY_NEGATIVE": -2,
     })
     signals = []
-    for idx, signal_text in enumerate(signal_texts):
-        sentiment = sentiment_model(signal_text[:512])
-        prediction = sentiment[0]
-        sentiment_label = normalize_sentiment_label(prediction.get("label", "NEUTRAL"), prediction.get("score", 0))
-        mapped_score = mapped_scores.get(prediction.get("label", "NEUTRAL"), 0)
-        signal_score = compute_signal_score(sentiment_label, mapped_score, row["source"], config)
+    for idx, (signal_text, force_neutral) in enumerate(signal_texts):
+        if force_neutral:
+            sentiment_label = "neutral"
+            signal_score = 0.0
+        else:
+            sentiment = sentiment_model(signal_text[:512])
+            prediction = sentiment[0]
+            sentiment_label = normalize_sentiment_label(prediction.get("label", "NEUTRAL"), prediction.get("score", 0))
+            mapped_score = mapped_scores.get(prediction.get("label", "NEUTRAL"), 0)
+            signal_score = compute_signal_score(sentiment_label, mapped_score, row["source"], config)
         signal_id = hashlib.sha256(f"{row['id']}-{signal_text}-{idx}".encode()).hexdigest()[:12]
         signals.append(
             Signal(
